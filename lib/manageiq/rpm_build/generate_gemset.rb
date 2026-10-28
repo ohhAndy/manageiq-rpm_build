@@ -77,7 +77,7 @@ module ManageIQ
 
           shell_cmd("bundle install --redownload --jobs #{cpus} --retry 3")
 
-          build_go_workers
+          build_plugin_workers
 
           if OPTIONS.npm_registry
             shell_cmd("#{SCRIPT_DIR.join("npm_registry/yarn_registry_setup.sh")} #{OPTIONS.npm_registry}")
@@ -138,8 +138,8 @@ module ManageIQ
       def generate_go_manifest
         where_am_i
 
-        # license_finder's go_modules support runs `go list -deps`, which needs the modules
-        # already in the module cache, populated by build_go_workers.
+        # license_finder's go_modules support runs `go list -deps`, which resolves modules
+        # through the Go module cache (already populated by the plugins' worker builds).
         go_dirs = go_worker_dirs
         if go_dirs.empty?
           # Always write the file so the gemset subpackage %files entry is satisfied
@@ -172,15 +172,14 @@ module ManageIQ
         Dir.glob(GEM_HOME.join("bundler/gems/*/workers/*/go.mod").to_s).map { |go_mod| File.dirname(go_mod) }
       end
 
-      # Build Go workers shipped inside plugins (e.g. manageiq-providers-vmware's event catcher)
-      def build_go_workers
+      # Plugins build their own workers (Go binary, container image, etc.) by defining an
+      # `update:workers` rake task in their lib/tasks. Skip when no plugin defines it.
+      def build_plugin_workers
         where_am_i
 
-        go_worker_dirs.each do |worker_dir|
-          Dir.chdir(worker_dir) do
-            shell_cmd("go build -trimpath -ldflags='-s -w' -o worker ./cmd/*", "CGO_ENABLED" => "0")
-          end
-        end
+        return if `rake -AT update:workers`.strip.empty?
+
+        shell_cmd("rake update:workers")
       end
 
       def cleanse_gemset
